@@ -1,0 +1,305 @@
+# Basic Python
+import sys
+import os
+sys.path.append(os.getcwd() + '/')
+import argparse
+import time
+import copy
+import random
+import hashlib
+import math
+from math import pi, cos
+from functools import partial
+
+# NumPy
+import numpy as np 
+
+# PyTorch
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.utils.data as data
+import torch.optim as optim
+import torchvision.models as models
+import torchvision.datasets as datasets
+import torchvision.transforms as transforms 
+
+# Other imports
+import sklearn.metrics as metrics
+from sklearn.model_selection import train_test_split
+import matplotlib.pyplot as plt
+
+# Inter-project imports
+from networks import ReconstructionCNN3D
+from utils import worker_init_fn, make_complex, make_deterministic, adjust_weight_decay_and_learning_rate
+
+######################################
+##### Get command line arguments #####
+######################################
+
+def arguments():
+    parser = argparse.ArgumentParser(description='CSE5194: Scientific Visualization Final Project!')
+
+    # Normal parameters
+    parser.add_argument('--path', default='', type=str, metavar='PATH', help='prefix path to images, networks, results')
+    parser.add_argument('--name', default='', type=str, metavar='NAME', help='name of experiment')
+    parser.add_argument('--dataset', default='cifar10', type=str, metavar='DATA', choices=['earth'], help='name of data set')
+    parser.add_argument('--batch_size', default=32, type=int, metavar='BS', help='batch size')
+    parser.add_argument('--learning_rate', default=0.001, type=float, metavar='LR', help='learning rate')
+    parser.add_argument('--num_epochs', default=1000, type=int, metavar='NE', help='number of epochs to train for')
+    parser.add_argument('--weight_decay', default=1e-4, type=float, metavar='WD', help='optimizer weight decay')
+    parser.add_argument('--scheduler', default='Trrue', type=str, metavar='SCH', help='should we use a lr scheduler')
+
+    # Parameters for reproducibility and how to train
+    parser.add_argument('--seed', default=None, type=str, metavar='S', help='set a seed for reproducability')
+    parser.add_argument('--device', default='cuda', type=str, metavar='DEV', help='device id (e.g. \'cpu\', \'cuda:0\'')
+
+    # Put parameters into a dictionary
+    args = vars(parser.parse_args())
+
+    # Append the necessary directories
+    args['image_dir'] = f'{args["path"]}{args["dataset"]}/images/'
+    args['network_dir'] = f'{args["path"]}{args["dataset"]}/networks/'
+    args['results_dir'] = f'{args["path"]}{args["dataset"]}/results/'
+
+    # Make sure a seed is specified
+    assert args['seed'] is not None, 'Must specify a seed value'
+
+    # Create the experiment name
+    args['name'] = f'train_{args["dataset"]}' if args['name'] == '' else args['name']
+
+    # Parse the lr scheduler option
+    args['scheduler'] = (args['scheduler'] == 'True')
+
+    # Set the device
+    if 'cuda' in args['device']:
+        assert torch.cuda.is_available(), 'Device set to GPU but CUDA not available'
+    args['device'] = torch.device(args['device'])
+
+    return args
+             
+#########################
+##### Main function #####
+#########################
+
+def main(args):
+    # Set the determinism
+    make_deterministic(args['seed'])
+
+    # TODO Create the mask and Voronoi transformations
+
+    # TODO Create the complete dataset object
+    in_channels = 2 # 2 for mask and Voronoi
+    out_channel = 1 # 1 for scalar field
+
+    # Split into train and test (seed this for a consistent test set)
+    # Save the old state so we can have constant val set 
+    previous_numpy_state = np.random.get_state()
+    previous_torch_state = torch.get_rng_state()
+    np.random.seed(make_complex(0))
+    torch.manual_seed(make_complex(0))
+
+    # Identify train and val indexes
+    train_indexes, test_indexes = train_test_split(np.arange(len(complete_dataset)), test_size=0.1)
+
+    # Restore the previous random state
+    np.random.set_state(previous_numpy_state)
+    torch.set_rng_state(previous_torch_state)
+
+    # Create the train and validation subsets
+    train_dataset = data.Subset(complete_dataset, train_indexes)
+    test_dataset = data.Subset(complete_dataset, test_indexes)
+
+    # Free up some sweet sweet memory
+    del complete_dataset, previous_numpy_state, previous_torch_state, train_indexes, test_indexes
+
+    # Create the network
+    network = ReconstructionCNN3D(in_channels, out_channels)
+    print(network)
+
+    # Create the loss function
+    loss_function = nn.MSELoss()
+
+    # Call the train helper function
+    train(args, train_dataset, test_dataset, network, loss_function)
+
+#################################
+##### Helper train function #####
+#################################
+
+def train(args, train_dataset, test_dataset, network, loss_function):
+    # Send network to GPU
+    network = network.to(args['device'])
+
+    # Create the dataloaders, seed their workers, etc.
+    train_dataloader = data.DataLoader(train_dataset, batch_size=args['batch_size'], shuffle=True, num_workers=2, pin_memory=True, worker_init_fn=worker_init_fn)
+    test_dataloader = data.DataLoader(test_dataset, batch_size=args['batch_size'], shuffle=False, num_workers=2, pin_memory=True, worker_init_fn=worker_init_fn)
+
+    # Correctly adjust weight decay (if necessary)
+    if args['weight_decay'] > 0:
+        parameters = adjust_weight_decay_and_learning_rate(network, weight_decay=args['weight_decay'], learning_rate=args['learning_rate'], lr_factor=args['bn_lr'])
+    else:
+        parameters = network.parameters()
+
+    # Create the adam optimizer
+    optimizer = optim.Adam(parameters, lr=args['learning_rate'], weight_decay=0.0)
+
+    # Create the learning rate scheduler
+    if args['scheduler']:
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args['num_epochs'], eta_min=1e-8)
+    else:
+        scheduler = None
+
+    # Get the number of examples in the train, val, and test datasets
+    num_train_instances = len(train_dataset)
+    num_test_instances = len(test_dataset)
+
+    # Get the number of batches in the train, val, and test dataset
+    num_train_batches = len(train_dataloader)
+    num_test_batches = len(test_dataloader)
+
+    # Arrays for keeping track of epoch results
+    # Train
+    training_losses = np.zeros(args['num_epochs'])
+
+    # Test
+    test_errors = np.zeros(args['num_epochs'])
+
+    ### Training
+    for epoch in range(args['num_epochs']):
+        
+        # Print out the epoch number
+        print(f'Epoch {epoch}:')
+        
+        ### TRAINING
+        # Prepare for training by enabling gradients
+        network.train()
+        torch.set_grad_enabled(True)
+        
+        # Instantiate the running training loss
+        training_loss = 0.0
+        
+        # Iterate over the TRAINING batches
+        for batch_num, (inputs, ground_truths) in enumerate(train_dataloader):
+            
+            # Send images and labels to compute device
+            inputs = inputs.to(args['device'])
+            ground_truths = ground_truths.to(args['device'])
+            
+            # Zero the gradients
+            optimizer.zero_grad(set_to_none=True)
+                    
+            # Forward propagation
+            reconstructions = network(inputs)
+            
+            # Compute loss
+            loss = loss_function(reconstructions, ground_truths)
+            
+            # Backward propagation
+            loss.backward()
+            
+            # Adjust weights
+            optimizer.step()
+            
+            # Accumulate average loss
+            training_loss += loss.item()
+            
+            # Give epoch status update
+            print(' ' * 100, end='\r', flush=True) 
+            print(f'Epoch {epoch}: {100. * (batch_num + 1) / num_train_batches : 0.1f}% ({batch_num + 1}/{num_train_batches}) - Loss = {loss.item()}', end='\r', flush=True)
+        
+        # Clear the status update message
+        print(' ' * 100, end='\r', flush=True) 
+        
+        # Get the average training loss
+        training_loss /= num_train_batches
+        print(f'Training Loss: {training_loss : 0.6f}')
+
+        # Take a LR scheduler step for step and cos only
+        if scheduler is not None:
+            scheduler.step()
+        
+        ### TEST
+        # Disable computing gradients
+        network.eval()
+        torch.set_grad_enabled(False)
+
+        # Instantiate array for keeping track of all L_2 errors
+        all_errors = np.zeros(num_test_instances)
+        
+        # Iterate over the TEST batches
+        for batch_num, (inputs, ground_truths) in enumerate(test_dataloader):
+            
+            # Send images and labels to compute device
+            inputs = inputs.to(args['device'])
+            ground_truths = ground_truths.to(args['device'])
+            
+            # Forward propagation
+            reconstructions = network(inputs)
+            
+            # Threshold for flat prediction
+            errors = F.mse_loss(reconstructions, ground_truths, reduction='none')
+            
+            # Record the actual and predicted labels for the instance
+            all_errors[ batch_num * args['batch_size'] : min( (batch_num + 1) * args['batch_size'], num_test_instances) ] = errors.detach().cpu().numpy()
+
+            # Give epoch status update
+            print(' ' * 100, end='\r', flush=True) 
+            print(f'Testing: {100. * (batch_num + 1) / num_test_batches : 0.1f}% ({batch_num + 1}/{num_test_batches})', end='\r', flush=True)
+        
+        # Clear the status update message
+        print(' ' * 100, end='\r', flush=True) 
+        
+        # Compute test set accuracy
+        average_L2_error = all_errors.mean()
+        print(f'Test Accuracy: {average_L2_error : 0.5f}')
+
+        # Save epoch results
+        # Train loss
+        training_losses[epoch] = training_loss
+
+        # Test accuracy
+        test_errors[epoch] = average_L2_error
+
+    # Save training results
+    try:
+        # Output training to file
+        with open(f'{args["results_dir"]}/{args["name"]}.txt', 'w') as f:
+            # Normal args
+            f.write(f'Name: {args["name"]},, \n')
+            f.write(f'Dataset: {args["dataset"]},, \n')
+            f.write(f'Batch Size: {args["batch_size"]},, \n')
+            f.write(f'Learning Rate: {args["learning_rate"]},, \n')
+            f.write(f'Num Epochs: {args["num_epochs"]},, \n')
+            f.write(f'Weight Decay: {args["weight_decay"]},, \n')
+            f.write(f'LR scheduler: {args["scheduler"]},, \n')
+
+            # Reproducibility args
+            f.write(f'Seed: {args["seed"]},, \n')
+            f.write(f'Device: {args["device"]},, \n')
+
+            # Print column headers
+            f.write('epoch,train_error,test_error \n')
+
+            # Zip everything into an object
+            zip_object = zip(
+                training_losses,
+                test_errors
+            )
+
+            # Output everything
+            for epoch, (train_loss, test_error) in enumerate(zip_object):
+                f.write(f'{epoch},{train_loss: 0.5f},{test_error: 0.5f} \n')
+    except:
+        print('Error when saving file')
+
+##############################################################
+##### Entry point to script, retrieves command line args #####
+##############################################################
+
+if __name__ == '__main__':
+    ### Get command line arguments
+    args = arguments()
+
+    ### Call main function
+    main(args)
