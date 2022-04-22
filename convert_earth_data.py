@@ -147,7 +147,8 @@ def transform_sperical_to_cartesian(size, temp, vx, vy, vz, sperical_coordinate)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='converting data')
-    parser.add_argument('--path', default='./data/earth/', type=str, metavar='PATH', help='prefix path to data')
+    parser.add_argument('--input_path', default='./data/earth/data/nc/', type=str, metavar='PATH', help='prefix path to data')
+    parser.add_argument('--output_path', default='./data/earth/data/raw/', type=str, metavar='PATH', help='prefix path to data')
     parser.add_argument('--example', default='spherical001', type=str, metavar='EX', help='input example name')
     parser.add_argument('--size', default=256, type=int, metavar='S', help='size^3 of output cartesian data')
 
@@ -156,7 +157,7 @@ if __name__ == '__main__':
     # Put parameters into a dictionary
     args = vars(parser.parse_args())
 
-    data = xr.open_dataset(f'{args["path"]}{args["example"]}.nc')
+    data = xr.open_dataset(f'{args["input_path"]}{args["example"]}.nc')
 
     # spherical coordinates, every variable is stored in the dimensionality order (lat, r, lon)
     _lat = data.lat.values # latitudes in degrees from 90 to -90, a 1x180 numpy array
@@ -173,7 +174,7 @@ if __name__ == '__main__':
 
     temp_cartesian = transform_sperical_to_cartesian(size, temp, vx, vy, vz, (_lat, _r, _lon))
 
-    temp_cartesian.T.astype("float32").tofile(f'{args["path"]}{args["example"]}_{args["size"]}.raw')
+    temp_cartesian.T.astype("float32").tofile(f'{args["output_path"]}{args["example"]}_{args["size"]}.raw')
     # temp_cartesian.T.astype("float32").tofile("res_" + str(size) + ".raw")
     
     print('Done! ')
