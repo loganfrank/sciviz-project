@@ -152,10 +152,10 @@ if __name__ == '__main__':
     parser.add_argument('--example', default='spherical001', type=str, metavar='EX', help='input example name')
     parser.add_argument('--size', default=256, type=int, metavar='S', help='size^3 of output cartesian data')
 
-    print(f'Converting {args["example"]}')
-
     # Put parameters into a dictionary
     args = vars(parser.parse_args())
+
+    print(f'Converting {args["example"]}')
 
     data = xr.open_dataset(f'{args["input_path"]}{args["example"]}.nc')
 
