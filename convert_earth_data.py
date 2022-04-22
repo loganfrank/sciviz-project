@@ -149,7 +149,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='converting data')
     parser.add_argument('--path', default='./data/earth/', type=str, metavar='PATH', help='prefix path to data')
     parser.add_argument('--example', default='spherical001', type=str, metavar='EX', help='input example name')
-    parser.add_argument('--var', default='vx', type=str, metavar='VAR', choices=['temp', 'vx', 'vy', 'vz'], help='name of experiment')
     parser.add_argument('--size', default=256, type=int, metavar='S', help='size^3 of output cartesian data')
 
     # Put parameters into a dictionary
