@@ -94,7 +94,7 @@ def transform_sperical_to_cartesian(size, temp, vx, vy, vz, sperical_coordinate)
     nan_val = 0 #np.nan
     for i in range(nx):
         for j in range(ny):
-            print('Progress: ', cnt / npts)
+            # print('Progress: ', cnt / npts)
             for k in range(nz):
                 cnt += 1
                 
@@ -150,6 +150,8 @@ if __name__ == '__main__':
     parser.add_argument('--path', default='./data/earth/', type=str, metavar='PATH', help='prefix path to data')
     parser.add_argument('--example', default='spherical001', type=str, metavar='EX', help='input example name')
     parser.add_argument('--size', default=256, type=int, metavar='S', help='size^3 of output cartesian data')
+
+    print(f'Converting {args["example"]}')
 
     # Put parameters into a dictionary
     args = vars(parser.parse_args())
