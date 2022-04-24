@@ -94,7 +94,7 @@ def main(args):
 
     # Create the mask and Voronoi transformations
     train_transform = transforms.Compose([ZFlip(0.5), YFlip(0.5), XFlip(0.5), MaskAndVoronoi3D(args['nsensors'])])
-    test_transform = transforms.Compose([MaskAndVoronoi3D(args['nsensors'])])
+    val_transform = transforms.Compose([MaskAndVoronoi3D(args['nsensors'])])
 
     # TODO Create the complete dataset object
     in_channels = args['nchannels'] + 1
@@ -111,13 +111,13 @@ def main(args):
     loss_function = nn.MSELoss()
 
     # Call the train helper function
-    train(args, train_dataset, val_dataset, test_dataset, network, loss_function)
+    train(args, train_dataset, val_dataset, network, loss_function)
 
 #################################
 ##### Helper train function #####
 #################################
 
-def train(args, train_dataset, val_dataset test_dataset, network, loss_function):
+def train(args, train_dataset, val_dataset, network, loss_function):
     # Send network to GPU
     network = network.to(args['device'])
 
