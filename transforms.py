@@ -55,8 +55,9 @@ class ZFlip(object):
         self.p = p
         
     def __call__(self, data):
-        if random.random() < self.p:
-            return torch.flip(data, dim=-3)
+        i = random.random()
+        if i < self.p:
+            return torch.flip(data, [-3])
         else:
             return data
         
@@ -66,18 +67,20 @@ class YFlip(object):
         self.p = p
         
     def __call__(self, data):
-        if random.random() < self.p:
-            return torch.flip(data, dim=-2)
+        i = random.random()
+        if i < self.p:
+            return torch.flip(data, [-2])
         else:
             return data
         
-class HFlip(object):
+class XFlip(object):
     def __init__(self, p):
         # Probability of flipping
         self.p = p
         
     def __call__(self, data):
-        if random.random() < self.p:
-            return torch.flip(data, dim=-1)
+        i = random.random()
+        if i < self.p:
+            return torch.flip(data, [-1])
         else:
             return data

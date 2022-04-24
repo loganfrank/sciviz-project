@@ -22,7 +22,7 @@ class ReconstructionCNN3D(nn.Module):
         self.conv10 = nn.Conv3d(48 * num_output_channels, num_output_channels, kernel_size=7, stride=1, padding='same', bias=True)
 
         # Initialize weights in the network: all weights following Kaiming normal and all biases are 0
-        for m in network.modules():
+        for m in self.modules():
             if isinstance(m, nn.Conv3d):
                 nn.init.kaiming_normal_(m.weight, mode='fan_in', nonlinearity='relu', a=0)
                 nn.init.constant_(m.bias, 0)

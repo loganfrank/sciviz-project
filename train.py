@@ -33,6 +33,7 @@ import matplotlib.pyplot as plt
 from networks import ReconstructionCNN3D
 from utils import worker_init_fn, make_complex, make_deterministic, adjust_weight_decay_and_learning_rate
 from transforms import ZFlip, YFlip, XFlip, MaskAndVoronoi3D
+from earth_dataset import EarthMantleDataset
 
 ######################################
 ##### Get command line arguments #####
@@ -49,12 +50,11 @@ def arguments():
     parser.add_argument('--batch_size', default=32, type=int, metavar='BS', help='batch size')
     parser.add_argument('--learning_rate', default=0.001, type=float, metavar='LR', help='learning rate')
     parser.add_argument('--num_epochs', default=1000, type=int, metavar='NE', help='number of epochs to train for')
-    parser.add_argument('--weight_decay', default=1e-4, type=float, metavar='WD', help='optimizer weight decay')
     parser.add_argument('--scheduler', default='True', type=str, metavar='SCH', help='should we use a lr scheduler')
 
     # Parameters for this project
     parser.add_argument('--nsensors', default=20, type=int, metavar='NS', help='number of sensors in our data')
-    parser.add_argu,ent('--nchannels', default=1, type=int, metavars='NC', help='1 for scalar field, 3 for vector field')
+    parser.add_argument('--nchannels', default=1, type=int, metavar='NC', help='1 for scalar field, 3 for vector field')
 
     # Parameters for reproducibility and how to train
     parser.add_argument('--seed', default=None, type=str, metavar='S', help='set a seed for reproducability')
@@ -62,11 +62,6 @@ def arguments():
 
     # Put parameters into a dictionary
     args = vars(parser.parse_args())
-
-    # Append the necessary directories
-    args['image_dir'] = f'{args["path"]}{args["dataset"]}/images/'
-    args['network_dir'] = f'{args["path"]}{args["dataset"]}/networks/'
-    args['results_dir'] = f'{args["path"]}{args["dataset"]}/results/'
 
     # Make sure a seed is specified
     assert args['seed'] is not None, 'Must specify a seed value'
@@ -96,14 +91,13 @@ def main(args):
     train_transform = transforms.Compose([ZFlip(0.5), YFlip(0.5), XFlip(0.5), MaskAndVoronoi3D(args['nsensors'])])
     val_transform = transforms.Compose([MaskAndVoronoi3D(args['nsensors'])])
 
-    # TODO Create the complete dataset object
-    in_channels = args['nchannels'] + 1
-    out_channel = args['nchannels'] 
-    train_dataset = None
-    val_dataset = None
-    test_dataset = None
-
+    # Create the train and val dataset objects
+    train_dataset = EarthMantleDataset(root=f'{args["image_dir"]}train/', transform=train_transform, nchannels=args['nchannels'])
+    val_dataset = EarthMantleDataset(root=f'{args["image_dir"]}val/', transform=val_transform, nchannels=args['nchannels'])
+    
     # Create the network
+    in_channels = args['nchannels'] + 1
+    out_channels = args['nchannels'] 
     network = ReconstructionCNN3D(in_channels, out_channels)
     print(network)
 
@@ -122,17 +116,11 @@ def train(args, train_dataset, val_dataset, network, loss_function):
     network = network.to(args['device'])
 
     # Create the dataloaders, seed their workers, etc.
-    train_dataloader = data.DataLoader(train_dataset, batch_size=args['batch_size'], shuffle=True, num_workers=2, pin_memory=True, worker_init_fn=worker_init_fn)
-    val_dataloader = data.DataLoader(val_dataset, batch_size=args['batch_size'], shuffle=False, num_workers=2, pin_memory=True, worker_init_fn=worker_init_fn)
-
-    # Correctly adjust weight decay (if necessary)
-    if args['weight_decay'] > 0:
-        parameters = adjust_weight_decay_and_learning_rate(network, weight_decay=args['weight_decay'], learning_rate=args['learning_rate'], lr_factor=args['bn_lr'])
-    else:
-        parameters = network.parameters()
+    train_dataloader = data.DataLoader(train_dataset, batch_size=args['batch_size'], shuffle=True, num_workers=4, pin_memory=True, worker_init_fn=worker_init_fn)
+    val_dataloader = data.DataLoader(val_dataset, batch_size=args['batch_size'], shuffle=False, num_workers=4, pin_memory=True, worker_init_fn=worker_init_fn)
 
     # Create the adam optimizer
-    optimizer = optim.Adam(parameters, lr=args['learning_rate'], weight_decay=0.0)
+    optimizer = optim.Adam(network.parameters(), lr=args['learning_rate'], weight_decay=0.0)
 
     # Create the learning rate scheduler
     if args['scheduler']:
