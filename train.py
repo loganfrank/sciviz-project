@@ -32,6 +32,7 @@ import matplotlib.pyplot as plt
 # Inter-project imports
 from networks import ReconstructionCNN3D
 from utils import worker_init_fn, make_complex, make_deterministic, adjust_weight_decay_and_learning_rate
+from transforms import ZFlip, YFlip, XFlip, MaskAndVoronoi3D
 
 ######################################
 ##### Get command line arguments #####
@@ -41,14 +42,19 @@ def arguments():
     parser = argparse.ArgumentParser(description='CSE5194: Scientific Visualization Final Project!')
 
     # Normal parameters
-    parser.add_argument('--path', default='', type=str, metavar='PATH', help='prefix path to images, networks, results')
+    parser.add_argument('--image_dir', default='', type=str, metavar='IMG', help='prefix path to images')
+    parser.add_argument('--networks_dir', default='', type=str, metavar='NET', help='prefix path to network weights')
+    parser.add_argument('--results_dir', default='', type=str, metavar='RES', help='prefix path to results')
     parser.add_argument('--name', default='', type=str, metavar='NAME', help='name of experiment')
-    parser.add_argument('--dataset', default='cifar10', type=str, metavar='DATA', choices=['earth'], help='name of data set')
     parser.add_argument('--batch_size', default=32, type=int, metavar='BS', help='batch size')
     parser.add_argument('--learning_rate', default=0.001, type=float, metavar='LR', help='learning rate')
     parser.add_argument('--num_epochs', default=1000, type=int, metavar='NE', help='number of epochs to train for')
     parser.add_argument('--weight_decay', default=1e-4, type=float, metavar='WD', help='optimizer weight decay')
-    parser.add_argument('--scheduler', default='Trrue', type=str, metavar='SCH', help='should we use a lr scheduler')
+    parser.add_argument('--scheduler', default='True', type=str, metavar='SCH', help='should we use a lr scheduler')
+
+    # Parameters for this project
+    parser.add_argument('--nsensors', default=20, type=int, metavar='NS', help='number of sensors in our data')
+    parser.add_argu,ent('--nchannels', default=1, type=int, metavars='NC', help='1 for scalar field, 3 for vector field')
 
     # Parameters for reproducibility and how to train
     parser.add_argument('--seed', default=None, type=str, metavar='S', help='set a seed for reproducability')
@@ -86,32 +92,16 @@ def main(args):
     # Set the determinism
     make_deterministic(args['seed'])
 
-    # TODO Create the mask and Voronoi transformations
+    # Create the mask and Voronoi transformations
+    train_transform = transforms.Compose([ZFlip(0.5), YFlip(0.5), XFlip(0.5), MaskAndVoronoi3D(args['nsensors'])])
+    test_transform = transforms.Compose([MaskAndVoronoi3D(args['nsensors'])])
 
     # TODO Create the complete dataset object
-    in_channels = 2 # 2 for mask and Voronoi
-    out_channel = 1 # 1 for scalar field
-
-    # Split into train and test (seed this for a consistent test set)
-    # Save the old state so we can have constant val set 
-    previous_numpy_state = np.random.get_state()
-    previous_torch_state = torch.get_rng_state()
-    np.random.seed(make_complex(0))
-    torch.manual_seed(make_complex(0))
-
-    # Identify train and val indexes
-    train_indexes, test_indexes = train_test_split(np.arange(len(complete_dataset)), test_size=0.1)
-
-    # Restore the previous random state
-    np.random.set_state(previous_numpy_state)
-    torch.set_rng_state(previous_torch_state)
-
-    # Create the train and validation subsets
-    train_dataset = data.Subset(complete_dataset, train_indexes)
-    test_dataset = data.Subset(complete_dataset, test_indexes)
-
-    # Free up some sweet sweet memory
-    del complete_dataset, previous_numpy_state, previous_torch_state, train_indexes, test_indexes
+    in_channels = args['nchannels'] + 1
+    out_channel = args['nchannels'] 
+    train_dataset = None
+    val_dataset = None
+    test_dataset = None
 
     # Create the network
     network = ReconstructionCNN3D(in_channels, out_channels)
@@ -121,19 +111,19 @@ def main(args):
     loss_function = nn.MSELoss()
 
     # Call the train helper function
-    train(args, train_dataset, test_dataset, network, loss_function)
+    train(args, train_dataset, val_dataset, test_dataset, network, loss_function)
 
 #################################
 ##### Helper train function #####
 #################################
 
-def train(args, train_dataset, test_dataset, network, loss_function):
+def train(args, train_dataset, val_dataset test_dataset, network, loss_function):
     # Send network to GPU
     network = network.to(args['device'])
 
     # Create the dataloaders, seed their workers, etc.
     train_dataloader = data.DataLoader(train_dataset, batch_size=args['batch_size'], shuffle=True, num_workers=2, pin_memory=True, worker_init_fn=worker_init_fn)
-    test_dataloader = data.DataLoader(test_dataset, batch_size=args['batch_size'], shuffle=False, num_workers=2, pin_memory=True, worker_init_fn=worker_init_fn)
+    val_dataloader = data.DataLoader(val_dataset, batch_size=args['batch_size'], shuffle=False, num_workers=2, pin_memory=True, worker_init_fn=worker_init_fn)
 
     # Correctly adjust weight decay (if necessary)
     if args['weight_decay'] > 0:
@@ -152,18 +142,18 @@ def train(args, train_dataset, test_dataset, network, loss_function):
 
     # Get the number of examples in the train, val, and test datasets
     num_train_instances = len(train_dataset)
-    num_test_instances = len(test_dataset)
+    num_val_instances = len(val_dataset)
 
     # Get the number of batches in the train, val, and test dataset
     num_train_batches = len(train_dataloader)
-    num_test_batches = len(test_dataloader)
+    num_val_batches = len(val_dataloader)
 
     # Arrays for keeping track of epoch results
     # Train
     training_losses = np.zeros(args['num_epochs'])
-
+    
     # Test
-    test_errors = np.zeros(args['num_epochs'])
+    val_errors = np.zeros(args['num_epochs'])
 
     ### Training
     for epoch in range(args['num_epochs']):
@@ -225,10 +215,10 @@ def train(args, train_dataset, test_dataset, network, loss_function):
         torch.set_grad_enabled(False)
 
         # Instantiate array for keeping track of all L_2 errors
-        all_errors = np.zeros(num_test_instances)
+        all_errors = np.zeros(num_val_instances)
         
         # Iterate over the TEST batches
-        for batch_num, (inputs, ground_truths) in enumerate(test_dataloader):
+        for batch_num, (inputs, ground_truths) in enumerate(val_dataloader):
             
             # Send images and labels to compute device
             inputs = inputs.to(args['device'])
@@ -241,11 +231,11 @@ def train(args, train_dataset, test_dataset, network, loss_function):
             errors = F.mse_loss(reconstructions, ground_truths, reduction='none')
             
             # Record the actual and predicted labels for the instance
-            all_errors[ batch_num * args['batch_size'] : min( (batch_num + 1) * args['batch_size'], num_test_instances) ] = errors.detach().cpu().numpy()
+            all_errors[ batch_num * args['batch_size'] : min( (batch_num + 1) * args['batch_size'], num_val_instances) ] = errors.detach().cpu().numpy()
 
             # Give epoch status update
             print(' ' * 100, end='\r', flush=True) 
-            print(f'Testing: {100. * (batch_num + 1) / num_test_batches : 0.1f}% ({batch_num + 1}/{num_test_batches})', end='\r', flush=True)
+            print(f'Testing: {100. * (batch_num + 1) / num_val_batches : 0.1f}% ({batch_num + 1}/{num_val_batches})', end='\r', flush=True)
         
         # Clear the status update message
         print(' ' * 100, end='\r', flush=True) 
@@ -259,7 +249,7 @@ def train(args, train_dataset, test_dataset, network, loss_function):
         training_losses[epoch] = training_loss
 
         # Test accuracy
-        test_errors[epoch] = average_L2_error
+        val_errors[epoch] = average_L2_error
 
     # Save training results
     try:
@@ -273,23 +263,27 @@ def train(args, train_dataset, test_dataset, network, loss_function):
             f.write(f'Num Epochs: {args["num_epochs"]},, \n')
             f.write(f'Weight Decay: {args["weight_decay"]},, \n')
             f.write(f'LR scheduler: {args["scheduler"]},, \n')
+            
+            # Project args
+            f.write(f'N Sensors: {args["nsensors"]},, \n')
+            f.write(f'N Channels: {args["nchannels"]},, \n')
 
             # Reproducibility args
             f.write(f'Seed: {args["seed"]},, \n')
             f.write(f'Device: {args["device"]},, \n')
 
             # Print column headers
-            f.write('epoch,train_error,test_error \n')
+            f.write('epoch,train_error,val_error \n')
 
             # Zip everything into an object
             zip_object = zip(
                 training_losses,
-                test_errors
+                val_errors
             )
 
             # Output everything
-            for epoch, (train_loss, test_error) in enumerate(zip_object):
-                f.write(f'{epoch},{train_loss: 0.5f},{test_error: 0.5f} \n')
+            for epoch, (train_loss, val_error) in enumerate(zip_object):
+                f.write(f'{epoch},{train_loss: 0.8f},{val_error: 0.8f} \n')
     except:
         print('Error when saving file')
 

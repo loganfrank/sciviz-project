@@ -10,16 +10,16 @@ class ReconstructionCNN3D(nn.Module):
         self.relu = nn.ReLU()
 
         # Series of convolutional layers
-        self.conv1 = nn.Conv3d(num_input_channels, 48, kernel_size=7, stride=1, padding='same', bias=True)
-        self.conv2 = nn.Conv3d(48, 48, kernel_size=7, stride=1, padding='same', bias=True)
-        self.conv3 = nn.Conv3d(48, 48, kernel_size=7, stride=1, padding='same', bias=True)
-        self.conv4 = nn.Conv3d(48, 48, kernel_size=7, stride=1, padding='same', bias=True)
-        self.conv5 = nn.Conv3d(48, 48, kernel_size=7, stride=1, padding='same', bias=True)
-        self.conv6 = nn.Conv3d(48, 48, kernel_size=7, stride=1, padding='same', bias=True)
-        self.conv7 = nn.Conv3d(48, 48, kernel_size=7, stride=1, padding='same', bias=True)
-        self.conv8 = nn.Conv3d(48, 48, kernel_size=7, stride=1, padding='same', bias=True)
-        self.conv9 = nn.Conv3d(48, 48, kernel_size=7, stride=1, padding='same', bias=True)
-        self.conv10 = nn.Conv3d(48, num_output_channels, kernel_size=7, stride=1, padding='same', bias=True)
+        self.conv1 = nn.Conv3d(num_input_channels, 48 * num_output_channels, kernel_size=7, stride=1, padding='same', bias=True)
+        self.conv2 = nn.Conv3d(48 * num_output_channels, 48 * num_output_channels, kernel_size=7, stride=1, padding='same', bias=True)
+        self.conv3 = nn.Conv3d(48 * num_output_channels, 48 * num_output_channels, kernel_size=7, stride=1, padding='same', bias=True)
+        self.conv4 = nn.Conv3d(48 * num_output_channels, 48 * num_output_channels, kernel_size=7, stride=1, padding='same', bias=True)
+        self.conv5 = nn.Conv3d(48 * num_output_channels, 48 * num_output_channels, kernel_size=7, stride=1, padding='same', bias=True)
+        self.conv6 = nn.Conv3d(48 * num_output_channels, 48 * num_output_channels, kernel_size=7, stride=1, padding='same', bias=True)
+        self.conv7 = nn.Conv3d(48 * num_output_channels, 48 * num_output_channels, kernel_size=7, stride=1, padding='same', bias=True)
+        self.conv8 = nn.Conv3d(48 * num_output_channels, 48 * num_output_channels, kernel_size=7, stride=1, padding='same', bias=True)
+        self.conv9 = nn.Conv3d(48 * num_output_channels, 48 * num_output_channels, kernel_size=7, stride=1, padding='same', bias=True)
+        self.conv10 = nn.Conv3d(48 * num_output_channels, num_output_channels, kernel_size=7, stride=1, padding='same', bias=True)
 
         # Initialize weights in the network: all weights following Kaiming normal and all biases are 0
         for m in network.modules():

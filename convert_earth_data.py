@@ -14,27 +14,37 @@ def interpolate_index(a, b):
     b is the bins
     """
     ind = np.digitize(a, b)
-    ceil = math.floor(ind) + 1
-    floor = math.floor(ind)
+    ceil = np.floor(ind) + 1
+    floor = np.floor(ind)
 
-    if ceil == len(b):
-        floor -= 1
-        ceil -= 1
+    floor = np.where(floor >= len(b)-1, len(b)-2, floor).astype(np.uint16)
+    ceil = np.where(ceil >= len(b), len(b)-1, ceil).astype(np.uint16)
 
     v_floor = b[floor]
     v_ceil = b[ceil]
 
     alpha = (a - v_floor) / (v_ceil - v_floor)
+    alpha = np.where(alpha > 1, 1, alpha)
+    alpha = np.where(alpha < 0, 0, alpha)
     return ((1 - alpha) * floor) + (alpha * ceil)
 
-def lerp3D(pt, values):
-    x, y, z = pt
-    xfloor = math.floor(x)
+def lerp3D(x, y, z, values):
+
+    xfloor = np.floor(x)
     xceil = xfloor + 1
-    yfloor = math.floor(y)
+    yfloor = np.floor(y)
     yceil = yfloor + 1
-    zfloor = math.floor(z)
+    zfloor = np.floor(z)
     zceil = zfloor + 1
+
+    xfloor = np.where(xfloor >= values.shape[0]-1, values.shape[0]-2, xfloor).astype(np.uint16)
+    xceil = np.where(xceil >= values.shape[0], values.shape[0]-1, xceil).astype(np.uint16)
+
+    yfloor = np.where(yfloor >= values.shape[1]-1, values.shape[1]-2, yfloor).astype(np.uint16)
+    yceil = np.where(yceil >= values.shape[1], values.shape[1]-1, yceil).astype(np.uint16)
+
+    zfloor = np.where(zfloor >= values.shape[2]-1, values.shape[2]-2, zfloor).astype(np.uint16)
+    zceil = np.where(zceil >= values.shape[2], values.shape[2]-1, zceil).astype(np.uint16)
 
     xa = (x - xfloor) / (xceil - xfloor)
     ya = (y - yfloor) / (yceil - yfloor)
@@ -44,24 +54,24 @@ def lerp3D(pt, values):
     interpolation_weights = np.array([xa, ya, za], dtype=np.float64)
 
     # Each cell is [x, y, z]
-    v0 = cell[0]
-    v1 = cell[1]
-    v2 = cell[2]
-    v3 = cell[3]
-    v4 = cell[4]
-    v5 = cell[5]
-    v6 = cell[6]
-    v7 = cell[7]
+    v0 = cell[0, :, :].T
+    v1 = cell[1, :, :].T
+    v2 = cell[2, :, :].T
+    v3 = cell[3, :, :].T
+    v4 = cell[4, :, :].T
+    v5 = cell[5, :, :].T
+    v6 = cell[6, :, :].T
+    v7 = cell[7, :, :].T
     
     # Get the values at the indexes
-    v0 = values[v0[0], v0[1], v0[2]]
-    v1 = values[v1[0], v1[1], v1[2]]
-    v2 = values[v2[0], v2[1], v2[2]]
-    v3 = values[v3[0], v3[1], v3[2]]
-    v4 = values[v4[0], v4[1], v4[2]]
-    v5 = values[v5[0], v5[1], v5[2]]
-    v6 = values[v6[0], v6[1], v6[2]]
-    v7 = values[v7[0], v7[1], v7[2]]
+    v0 = values[v0[:, 0], v0[:, 1], v0[:, 2]]
+    v1 = values[v1[:, 0], v1[:, 1], v1[:, 2]]
+    v2 = values[v2[:, 0], v2[:, 1], v2[:, 2]]
+    v3 = values[v3[:, 0], v3[:, 1], v3[:, 2]]
+    v4 = values[v4[:, 0], v4[:, 1], v4[:, 2]]
+    v5 = values[v5[:, 0], v5[:, 1], v5[:, 2]]
+    v6 = values[v6[:, 0], v6[:, 1], v6[:, 2]]
+    v7 = values[v7[:, 0], v7[:, 1], v7[:, 2]]
     
     # Get the interpolation weights
     wx = interpolation_weights[0]
@@ -89,67 +99,32 @@ def transform_sperical_to_cartesian(size, temp, vx, vy, vz, sperical_coordinate)
     x = np.linspace(-max_r, max_r, nx) 
     y = np.linspace(-max_r, max_r, ny)
     z = np.linspace(-max_r, max_r, nz)
+
+    pts = np.stack(np.meshgrid(x, y, z, indexing='xy'))
     
-    npts = nx*ny*nz
-    cnt = 0
     nan_val = 0 #np.nan
-    for i in tqdm(range(nx)):
-        for j in range(ny):
-            # print('Progress: ', cnt / npts)
-            for k in range(nz):
-                cnt += 1
-                
-                _x = x[i]
-                _y = y[j]
-                _z = z[k]
-                
-                _r = np.sqrt(_x**2 + _y**2 + _z**2)
-                _lat = np.rad2deg(np.arcsin(_z / _r))
-                _lon = np.rad2deg(np.arctan2(_y, _x))
-                
-                if _lon < 0: 
-                    _lon += 360
-                
-                pt = None
-                if np.abs(_r) > max_r:
-                    _temp = nan_val
-                    _vx = nan_val
-                    _vy = nan_val
-                    _vz = nan_val
-                    _r_id = nan_val
-                    _lat_id = nan_val
-                    _lon_id = nan_val
-                else:
-                    _r_id = interpolate_index(_r, r)
-                    _lat_id = interpolate_index(_lat, lat)
-                    _lon_id = interpolate_index(_lon, lon)
-                    
-                    if _r_id is None or _lat_id is None or _lon_id is None: 
-                        _temp = nan_val
-                        _vx = nan_val
-                        _vy = nan_val
-                        _vz = nan_val
-                    elif (_r_id < 0):
-                        _temp = nan_val
-                        _vx = nan_val
-                        _vy = nan_val
-                        _vz = nan_val
-                    else:
-                        # print(_lat_id, _r_id, _lon_id)
-                        pt = np.array([_lat_id, _r_id, _lon_id], dtype=np.float32)
-                        _temp = lerp3D(pt, temp)
-                        _vx = lerp3D(pt, vx)
-                        _vy = lerp3D(pt, vy)
-                        _vz = lerp3D(pt, vz)
-                
-                res[0][i][j][k] = _temp
-                res[1][i][j][k] = _vx
-                res[2][i][j][k] = _vy
-                res[3][i][j][k] = _vz
+    _r = np.sqrt(pts[0,:,:,:]**2 + pts[1,:,:,:]**2 + pts[2,:,:,:]**2)
+    _lat = np.rad2deg(np.arcsin(pts[2,:,:,:] / _r))
+    _lon = np.rad2deg(np.arctan2(pts[1,:,:,:], pts[0,:,:,:]))
+    _lon = np.where(_lon < 0, _lon + 360, _lon)
 
-                del _temp, _vx, _vy, _vz, pt, _r_id, _lat_id, _lon_id, _r, _lat, _lon, _x, _y, _z
+    _r_id = interpolate_index(_r, r).flatten()
+    _lat_id = interpolate_index(_lat, lat).flatten()
+    _lon_id = interpolate_index(_lon, lon).flatten()
 
-    return res
+    _temp = lerp3D(_lat_id, _r_id, _lon_id, temp).reshape(size, size, size)
+    _vx = lerp3D(_lat_id, _r_id, _lon_id, vx).reshape(size, size, size)
+    _vy = lerp3D(_lat_id, _r_id, _lon_id, vy).reshape(size, size, size)
+    _vz = lerp3D(_lat_id, _r_id, _lon_id, vz).reshape(size, size, size)
+
+    _temp = np.where(np.abs(_r) > max_r, 0, _temp)
+    _vx = np.where(np.abs(_r) > max_r, 0, _vx)
+    _vy = np.where(np.abs(_r) > max_r, 0, _vy)
+    _vz = np.where(np.abs(_r) > max_r, 0, _vz)
+
+    res = np.stack((_temp, _vx, _vy, _vz))
+
+    return _temp, res
 
 
 if __name__ == '__main__':
@@ -181,8 +156,7 @@ if __name__ == '__main__':
 
     temp_cartesian, all_cartesian = transform_sperical_to_cartesian(size, temp, vx, vy, vz, (_lat, _r, _lon))
 
-    temp_cartesian.T.astype("float32").tofile(f'{args["output_path"]}{args["example"]}_temp_{args["size"]}.raw')
+    # temp_cartesian.T.astype("float32").tofile(f'{args["output_path"]}{args["example"]}_temp_{args["size"]}.raw')
     all_cartesian.T.astype("float32").tofile(f'{args["output_path"]}{args["example"]}_{args["size"]}.raw')
-    # temp_cartesian.T.astype("float32").tofile("res_" + str(size) + ".raw")
     
     print('Done! ')
