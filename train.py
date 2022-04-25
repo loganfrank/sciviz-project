@@ -106,6 +106,7 @@ def main(args):
     in_channels = args['nchannels'] + 1
     out_channels = args['nchannels'] 
     network = ReconstructionCNN3D(in_channels, out_channels)
+    network = nn.DataParallel(network)
     print(network)
 
     # Create the loss function
@@ -123,8 +124,8 @@ def train(args, train_dataset, val_dataset, network, loss_function):
     network = network.to(args['device'])
 
     # Create the dataloaders, seed their workers, etc.
-    train_dataloader = data.DataLoader(train_dataset, batch_size=args['batch_size'], shuffle=True, num_workers=4, pin_memory=True, worker_init_fn=worker_init_fn)
-    val_dataloader = data.DataLoader(val_dataset, batch_size=args['batch_size'], shuffle=False, num_workers=4, pin_memory=True, worker_init_fn=worker_init_fn)
+    train_dataloader = data.DataLoader(train_dataset, batch_size=args['batch_size'], shuffle=True, num_workers=0, pin_memory=True, worker_init_fn=worker_init_fn)
+    val_dataloader = data.DataLoader(val_dataset, batch_size=args['batch_size'], shuffle=False, num_workers=0, pin_memory=True, worker_init_fn=worker_init_fn)
 
     # Create the adam optimizer
     optimizer = optim.Adam(network.parameters(), lr=args['learning_rate'], weight_decay=0.0)
@@ -163,6 +164,9 @@ def train(args, train_dataset, val_dataset, network, loss_function):
         
         # Instantiate the running training loss
         training_loss = 0.0
+
+        # Keep track of best L2 error
+        best_L2_error = np.inf
         
         # Iterate over the TRAINING batches
         for batch_num, (inputs, ground_truths) in enumerate(train_dataloader):
@@ -198,7 +202,7 @@ def train(args, train_dataset, val_dataset, network, loss_function):
         
         # Get the average training loss
         training_loss /= num_train_batches
-        print(f'Training Loss: {training_loss : 0.6f}')
+        print(f'Training Error: {training_loss : 0.6f}')
 
         # Take a LR scheduler step for step and cos only
         if scheduler is not None:
@@ -223,7 +227,7 @@ def train(args, train_dataset, val_dataset, network, loss_function):
             reconstructions = network(inputs)
             
             # Threshold for flat prediction
-            errors = F.mse_loss(reconstructions, ground_truths, reduction='none')
+            errors = F.mse_loss(reconstructions, ground_truths, reduction='none').mean(dim=[1, 2, 3, 4])
             
             # Record the actual and predicted labels for the instance
             all_errors[ batch_num * args['batch_size'] : min( (batch_num + 1) * args['batch_size'], num_val_instances) ] = errors.detach().cpu().numpy()
@@ -237,7 +241,14 @@ def train(args, train_dataset, val_dataset, network, loss_function):
         
         # Compute test set accuracy
         average_L2_error = all_errors.mean()
-        print(f'Test Accuracy: {average_L2_error : 0.5f}')
+        print(f'Val Error: {average_L2_error : 0.5f}')
+
+        # Keep track of best validation model
+        if average_L2_error < best_L2_error:
+            print('Found improved network')
+            best_L2_error = average_L2_error
+
+            torch.save(network.state_dict(), f'{args["networks_dir"]}/{args["name"]}-best.pt')
 
         # Save epoch results
         # Train loss

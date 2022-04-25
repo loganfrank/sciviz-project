@@ -88,7 +88,7 @@ class MaskAndVoronoi3D(object):
         voronoi = (sensor_values[closest_sensor].T).reshape(data.shape)
         
         # Create the sensor location mask
-        mask = torch.zeros((data.shape[-3], data.shape[-2], data.shape[-1]))
+        mask = torch.zeros((data.shape[-3], data.shape[-2], data.shape[-1]), device=self.device)
         mask[sensor_points[:, 0], sensor_points[:, 1], sensor_points[:, 2]] = 1
         mask = torch.unsqueeze(mask, dim=0)
         
@@ -96,7 +96,7 @@ class MaskAndVoronoi3D(object):
         output = torch.cat((mask.clone(), voronoi.clone()), dim=0)
         
         # Free up memory
-        del data, sensor_points, sensor_values, points, distances, x, y, z, closest_sensor, voronoi, mask
+        del data, sensor_points, sensor_values, points, closest_sensor, distances, mask, voronoi, x, y, z
         
         # Return mask and Voronoi network input
         return output
