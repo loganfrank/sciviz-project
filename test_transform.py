@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from transforms import MaskAndVoronoi3D
+from transforms import MaskAndVoronoi2D
 
 if __name__ == '__main__':
     
@@ -9,8 +9,9 @@ if __name__ == '__main__':
     n_channels = 1
     device = torch.device('cuda')
     
-    data = torch.rand((n_channels, 128, 128, 128), dtype=torch.float32)
-    t = MaskAndVoronoi3D(150, device=device)
+    data = torch.rand((2, 96, 96), dtype=torch.float32)
+    t = MaskAndVoronoi2D(200, 10, device=device)
+    t.generate_masks(data=data)
     res = t(data)
     
     print('stop')

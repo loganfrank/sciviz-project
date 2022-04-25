@@ -7,29 +7,26 @@ import torchvision.datasets as datasets
 import numpy as np
 
 class VectorFieldSim2D(torch.utils.data.Dataset):
-    def __init__(self, u_equation, v_equation, noise_equation, num_examples, transform):
-        self.nchannels = nchannels
+    def __init__(self, u_equation, v_equation, noise_equation, num_examples, size, transform):
+        # All points in the example
+        x = torch.linspace(0, size - 1, steps=size)
+        y = torch.linspace(0, size - 1, steps=size)
+        points = torch.stack(torch.meshgrid(y, x))
+
+        u = u_equation(points[-2], points[-1])
+        v = v_equation(points[-2], points[-1])
+        self.instances = torch.stack([u, v])
+        self.instances = torch.repeat_interleave(self.instances[None, :, :, :], num_examples, dim=0)
+        self.instances = self.instances + noise_equation((torch.rand_like(self.instances[:, 0, :, :]).unsqueeze(1) * 10) - 5)
+
+        self.transform = transform
         
     def __len__(self):
         return len(self.instances)
         
     def __getitem__(self, index):
-        path = f'{self.root}{self.instances[index]}'
-        data = np.fromfile(path, dtype=np.float32)
-        data = data.reshape(128, 128, 128, 4).transpose(3, 0, 1, 2)
-        
-        if self.nchannels == 1:
-            data = data[:1, :, :, :]
-        else:
-            data = data[1:, :, :, :]
-        
-        # Convert to PyTorch tensor
-        data = torch.from_numpy(data)
-
-        # Crop data if desired
-        if self.random_crop > 0:
-            z, y, x = np.random.randint(0, 96, 3)
-            data = data[:, z:z+32, y:y+32, x:x+32]
+        # Retrieve the instance
+        data = self.instances[index]
 
         # Clone for ground truth then create the mask and Voronoi inputs
         ground_truth = data.clone()

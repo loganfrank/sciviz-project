@@ -43,23 +43,20 @@ def arguments():
     parser = argparse.ArgumentParser(description='CSE5194: Scientific Visualization Final Project!')
 
     # Normal parameters
-    parser.add_argument('--image_dir', default='', type=str, metavar='IMG', help='prefix path to images')
-    parser.add_argument('--networks_dir', default='', type=str, metavar='NET', help='prefix path to network weights')
-    parser.add_argument('--results_dir', default='', type=str, metavar='RES', help='prefix path to results')
-    parser.add_argument('--name', default='', type=str, metavar='NAME', help='name of experiment')
+    parser.add_argument('--name', default='train_vector_field', type=str, metavar='NAME', help='name of experiment')
     parser.add_argument('--batch_size', default=32, type=int, metavar='BS', help='batch size')
     parser.add_argument('--learning_rate', default=0.001, type=float, metavar='LR', help='learning rate')
-    parser.add_argument('--num_epochs', default=1000, type=int, metavar='NE', help='number of epochs to train for')
+    parser.add_argument('--num_epochs', default=5, type=int, metavar='NE', help='number of epochs to train for')
     parser.add_argument('--scheduler', default='True', type=str, metavar='SCH', help='should we use a lr scheduler')
 
     # Parameters for this project
-    parser.add_argument('--nsensors', default=20, type=int, metavar='NS', help='number of sensors in our data')
+    parser.add_argument('--nsensors', default=250, type=int, metavar='NS', help='number of sensors in our data')
     parser.add_argument('--nmasks', default=10, type=int, metavar='NM', help='number of pre-generated masks to use')
     parser.add_argument('--nexamples', default='500,100,100', type=str, metavar='NEX', help='number of train, validation, and test examples')
     parser.add_argument('--size', default=96, type=int, metavar='SIZE', help='size of one training example, h=w=size (square)')
 
     # Parameters for reproducibility and how to train
-    parser.add_argument('--seed', default=None, type=str, metavar='S', help='set a seed for reproducability')
+    parser.add_argument('--seed', default='1', type=str, metavar='S', help='set a seed for reproducability')
     parser.add_argument('--device', default='cuda', type=str, metavar='DEV', help='device id (e.g. \'cpu\', \'cuda:0\'')
 
     # Put parameters into a dictionary
@@ -69,10 +66,13 @@ def arguments():
     assert args['seed'] is not None, 'Must specify a seed value'
 
     # Create the experiment name
-    args['name'] = f'train_{args["dataset"]}' if args['name'] == '' else args['name']
+    args['name'] = f'train' if args['name'] == '' else args['name']
 
     # Parse the lr scheduler option
     args['scheduler'] = (args['scheduler'] == 'True')
+
+    # Parse the num train/val/test examples
+    args['nexamples'] = [int(n) for n in args['nexamples'].split(',')]
 
     # Set the device
     if 'cuda' in args['device']:
@@ -90,22 +90,22 @@ def main(args):
     make_deterministic(args['seed'])
 
     # Create the mask and Voronoi transformations
-    train_transform = MaskAndVoronoi3D(args['nsensors'], args['nmasks'])
-    train_transform.generate_masks()
-    val_transform = MaskAndVoronoi3D(args['nsensors'], args['nmasks'])
-    val_transform.generate_masks()
+    train_transform = MaskAndVoronoi2D(args['nsensors'], args['nmasks'])
+    train_transform.generate_masks(data=torch.empty((2, args['size'], args['size']), dtype=torch.float32))
+    val_transform = MaskAndVoronoi2D(args['nsensors'], args['nmasks'])
+    val_transform.generate_masks(data=torch.empty((2, args['size'], args['size']), dtype=torch.float32))
 
     # Create the train and val dataset objects
-    u_equation = lambda x, y: 20 * np.sin(0.25 * x + 0.25 * y)
-    v_equation = lambda x, y: 20 * np.cos(0.25 * x - 0.25 * y)
-    noise_equation = lambda x: np.sin(x) + np.cos(x)
-    train_dataset = VectorFieldSim2D(u_equation=u_equation, v_equation=v_equation, noise_equation=noise_equation, transform=train_transform, nchannels=args['nchannels'])
-    val_dataset = VectorFieldSim2D(root=f'{args["image_dir"]}val/', transform=val_transform, nchannels=args['nchannels'])
+    u_equation = lambda x, y: 20 * np.sin(0.05*x + 0.05*y)
+    v_equation = lambda x, y: 20 * np.cos(0.05*x - 0.05*y)
+    noise_equation = lambda x: 0.25 * np.cos(x)
+    train_dataset = VectorFieldSim2D(u_equation=u_equation, v_equation=v_equation, noise_equation=noise_equation, num_examples=args['nexamples'][0], size=args['size'], transform=train_transform)
+    val_dataset = VectorFieldSim2D(u_equation=u_equation, v_equation=v_equation, noise_equation=noise_equation, num_examples=args['nexamples'][1], size=args['size'], transform=val_transform)
     
     # Create the network
-    in_channels = args['nchannels'] + 1
-    out_channels = args['nchannels'] 
-    network = ReconstructionCNN3D(in_channels, out_channels)
+    in_channels = 3 # U and V Voronoi tesselation and mask input = 3 input channels
+    out_channels = 2 # U and V reconstruction
+    network = ReconstructionCNN2D(in_channels, out_channels)
     network = nn.DataParallel(network)
     print(network)
 
@@ -124,8 +124,8 @@ def train(args, train_dataset, val_dataset, network, loss_function):
     network = network.to(args['device'])
 
     # Create the dataloaders, seed their workers, etc.
-    train_dataloader = data.DataLoader(train_dataset, batch_size=args['batch_size'], shuffle=True, num_workers=0, pin_memory=True, worker_init_fn=worker_init_fn)
-    val_dataloader = data.DataLoader(val_dataset, batch_size=args['batch_size'], shuffle=False, num_workers=0, pin_memory=True, worker_init_fn=worker_init_fn)
+    train_dataloader = data.DataLoader(train_dataset, batch_size=args['batch_size'], shuffle=True, num_workers=0, pin_memory=True)
+    val_dataloader = data.DataLoader(val_dataset, batch_size=args['batch_size'], shuffle=False, num_workers=0, pin_memory=True)
 
     # Create the adam optimizer
     optimizer = optim.Adam(network.parameters(), lr=args['learning_rate'], weight_decay=0.0)
@@ -227,7 +227,7 @@ def train(args, train_dataset, val_dataset, network, loss_function):
             reconstructions = network(inputs)
             
             # Threshold for flat prediction
-            errors = F.mse_loss(reconstructions, ground_truths, reduction='none').mean(dim=[1, 2, 3, 4])
+            errors = F.mse_loss(reconstructions, ground_truths, reduction='none').mean(dim=[1, 2, 3])
             
             # Record the actual and predicted labels for the instance
             all_errors[ batch_num * args['batch_size'] : min( (batch_num + 1) * args['batch_size'], num_val_instances) ] = errors.detach().cpu().numpy()
@@ -248,7 +248,7 @@ def train(args, train_dataset, val_dataset, network, loss_function):
             print('Found improved network')
             best_L2_error = average_L2_error
 
-            torch.save(network.state_dict(), f'{args["networks_dir"]}/{args["name"]}-best.pt')
+            torch.save(network.state_dict(), f'./{args["name"]}-best.pt')
 
         # Save epoch results
         # Train loss
@@ -260,19 +260,19 @@ def train(args, train_dataset, val_dataset, network, loss_function):
     # Save training results
     try:
         # Output training to file
-        with open(f'{args["results_dir"]}/{args["name"]}.txt', 'w') as f:
+        with open(f'./{args["name"]}.txt', 'w') as f:
             # Normal args
             f.write(f'Name: {args["name"]},, \n')
-            f.write(f'Dataset: {args["dataset"]},, \n')
             f.write(f'Batch Size: {args["batch_size"]},, \n')
             f.write(f'Learning Rate: {args["learning_rate"]},, \n')
             f.write(f'Num Epochs: {args["num_epochs"]},, \n')
-            f.write(f'Weight Decay: {args["weight_decay"]},, \n')
             f.write(f'LR scheduler: {args["scheduler"]},, \n')
             
             # Project args
             f.write(f'N Sensors: {args["nsensors"]},, \n')
-            f.write(f'N Channels: {args["nchannels"]},, \n')
+            f.write(f'N Masks: {args["nmasks"]},, \n')
+            f.write(f'N Examples: {args["nexamples"]},, \n')
+            f.write(f'Size: {args["size"]},, \n')
 
             # Reproducibility args
             f.write(f'Seed: {args["seed"]},, \n')
