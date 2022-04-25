@@ -30,10 +30,10 @@ from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 
 # Inter-project imports
-from networks import ReconstructionCNN3D
-from utils import worker_init_fn, make_complex, make_deterministic, adjust_weight_decay_and_learning_rate
-from transforms import ZFlip, YFlip, XFlip, MaskAndVoronoi3D
-from earth_dataset import EarthMantleDataset
+from networks import ReconstructionCNN2D
+from utils import make_complex, make_deterministic
+from transforms import MaskAndVoronoi2D
+from dataset import VectorFieldSim2D
 
 ######################################
 ##### Get command line arguments #####
@@ -54,7 +54,9 @@ def arguments():
 
     # Parameters for this project
     parser.add_argument('--nsensors', default=20, type=int, metavar='NS', help='number of sensors in our data')
-    parser.add_argument('--nchannels', default=1, type=int, metavar='NC', help='1 for scalar field, 3 for vector field')
+    parser.add_argument('--nmasks', default=10, type=int, metavar='NM', help='number of pre-generated masks to use')
+    parser.add_argument('--nexamples', default='500,100,100', type=str, metavar='NEX', help='number of train, validation, and test examples')
+    parser.add_argument('--size', default=96, type=int, metavar='SIZE', help='size of one training example, h=w=size (square)')
 
     # Parameters for reproducibility and how to train
     parser.add_argument('--seed', default=None, type=str, metavar='S', help='set a seed for reproducability')
@@ -88,12 +90,17 @@ def main(args):
     make_deterministic(args['seed'])
 
     # Create the mask and Voronoi transformations
-    train_transform = transforms.Compose([ZFlip(0.5), YFlip(0.5), XFlip(0.5), MaskAndVoronoi3D(args['nsensors'])])
-    val_transform = transforms.Compose([MaskAndVoronoi3D(args['nsensors'])])
+    train_transform = MaskAndVoronoi3D(args['nsensors'], args['nmasks'])
+    train_transform.generate_masks()
+    val_transform = MaskAndVoronoi3D(args['nsensors'], args['nmasks'])
+    val_transform.generate_masks()
 
     # Create the train and val dataset objects
-    train_dataset = EarthMantleDataset(root=f'{args["image_dir"]}train/', transform=train_transform, nchannels=args['nchannels'])
-    val_dataset = EarthMantleDataset(root=f'{args["image_dir"]}val/', transform=val_transform, nchannels=args['nchannels'])
+    u_equation = lambda x, y: 20 * np.sin(0.25 * x + 0.25 * y)
+    v_equation = lambda x, y: 20 * np.cos(0.25 * x - 0.25 * y)
+    noise_equation = lambda x: np.sin(x) + np.cos(x)
+    train_dataset = VectorFieldSim2D(u_equation=u_equation, v_equation=v_equation, noise_equation=noise_equation, transform=train_transform, nchannels=args['nchannels'])
+    val_dataset = VectorFieldSim2D(root=f'{args["image_dir"]}val/', transform=val_transform, nchannels=args['nchannels'])
     
     # Create the network
     in_channels = args['nchannels'] + 1

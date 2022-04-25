@@ -6,12 +6,9 @@ import torchvision.datasets as datasets
 
 import numpy as np
 
-class EarthMantleDataset(torch.utils.data.Dataset):
-    def __init__(self, root, transform, nchannels):
-        self.root = root
-        self.transform = transform
+class VectorFieldSim2D(torch.utils.data.Dataset):
+    def __init__(self, u_equation, v_equation, noise_equation, num_examples, transform):
         self.nchannels = nchannels
-        self.instances = [f for f in os.listdir(self.root) if 'raw' in f]
         
     def __len__(self):
         return len(self.instances)
