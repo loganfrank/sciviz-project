@@ -45,13 +45,13 @@ def arguments():
     # Normal parameters
     parser.add_argument('--name', default='train_vector_field', type=str, metavar='NAME', help='name of experiment')
     parser.add_argument('--batch_size', default=32, type=int, metavar='BS', help='batch size')
-    parser.add_argument('--learning_rate', default=0.001, type=float, metavar='LR', help='learning rate')
-    parser.add_argument('--num_epochs', default=5, type=int, metavar='NE', help='number of epochs to train for')
+    parser.add_argument('--learning_rate', default=0.0005, type=float, metavar='LR', help='learning rate')
+    parser.add_argument('--num_epochs', default=500, type=int, metavar='NE', help='number of epochs to train for')
     parser.add_argument('--scheduler', default='True', type=str, metavar='SCH', help='should we use a lr scheduler')
 
     # Parameters for this project
-    parser.add_argument('--nsensors', default=250, type=int, metavar='NS', help='number of sensors in our data')
-    parser.add_argument('--nmasks', default=10, type=int, metavar='NM', help='number of pre-generated masks to use')
+    parser.add_argument('--nsensors', default=150, type=int, metavar='NS', help='number of sensors in our data')
+    parser.add_argument('--nmasks', default=20, type=int, metavar='NM', help='number of pre-generated masks to use')
     parser.add_argument('--nexamples', default='500,100,100', type=str, metavar='NEX', help='number of train, validation, and test examples')
     parser.add_argument('--size', default=96, type=int, metavar='SIZE', help='size of one training example, h=w=size (square)')
 
@@ -106,7 +106,7 @@ def main(args):
     in_channels = 3 # U and V Voronoi tesselation and mask input = 3 input channels
     out_channels = 2 # U and V reconstruction
     network = ReconstructionCNN2D(in_channels, out_channels)
-    network = nn.DataParallel(network)
+    # network = nn.DataParallel(network)
     print(network)
 
     # Create the loss function
@@ -151,6 +151,9 @@ def train(args, train_dataset, val_dataset, network, loss_function):
     # Test
     val_errors = np.zeros(args['num_epochs'])
 
+    # Keep track of best L2 error
+    best_L2_error = np.inf
+
     ### Training
     for epoch in range(args['num_epochs']):
         
@@ -164,9 +167,6 @@ def train(args, train_dataset, val_dataset, network, loss_function):
         
         # Instantiate the running training loss
         training_loss = 0.0
-
-        # Keep track of best L2 error
-        best_L2_error = np.inf
         
         # Iterate over the TRAINING batches
         for batch_num, (inputs, ground_truths) in enumerate(train_dataloader):
