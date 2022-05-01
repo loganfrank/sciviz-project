@@ -31,7 +31,7 @@ import matplotlib.pyplot as plt
 
 # Inter-project imports
 from networks import ReconstructionCNN2D
-from utils import make_complex, make_deterministic
+from utils import make_complex, make_deterministic, compute_reconstruction_difference
 from transforms import MaskAndVoronoi2D
 from dataset import VectorFieldSim2D
 
@@ -87,7 +87,7 @@ def arguments():
 
 def main(args):
     # Set the determinism
-    make_deterministic(args['seed'])
+    make_deterministic('1')
 
     # Create the mask and Voronoi transformations
     # 150 and 20 are hard-coded to ensure they are the same ones that were used 
@@ -96,15 +96,18 @@ def main(args):
     train_transform.generate_masks(data=torch.empty((2, args['size'], args['size']), dtype=torch.float32))
     val_transform = MaskAndVoronoi2D(150, 20)
     val_transform.generate_masks(data=torch.empty((2, args['size'], args['size']), dtype=torch.float32))
-    test_transform = MaskAndVoronoi2D(args['nsensors'], args['nmasks'])
-    test_transform.generate_masks(data=torch.empty((2, args['size'], args['size']), dtype=torch.float32))
-
+   
     # Create the train and val dataset objects
     u_equation = lambda x, y: 20 * np.sin(0.05*x + 0.05*y)
     v_equation = lambda x, y: 20 * np.cos(0.05*x - 0.05*y)
     noise_equation = lambda x: 0.25 * np.cos(x)
     train_dataset = VectorFieldSim2D(u_equation=u_equation, v_equation=v_equation, noise_equation=noise_equation, num_examples=args['nexamples'][0], size=args['size'], transform=train_transform)
     val_dataset = VectorFieldSim2D(u_equation=u_equation, v_equation=v_equation, noise_equation=noise_equation, num_examples=args['nexamples'][1], size=args['size'], transform=val_transform)
+    
+    # insert transforms
+    test_transform = MaskAndVoronoi2D(args['nsensors'], args['nmasks'])
+    test_transform.generate_masks(data=torch.empty((2, args['size'], args['size']), dtype=torch.float32))
+
     test_dataset = VectorFieldSim2D(u_equation=u_equation, v_equation=v_equation, noise_equation=noise_equation, num_examples=args['nexamples'][1], size=args['size'], transform=test_transform)
 
     # We won't need these, only created so we don't accidentally
@@ -132,7 +135,9 @@ def test(args, test_dataset, network):
     network = network.to(args['device'])
 
     # Create the dataloaders, seed their workers, etc.
-    test_dataloader = data.DataLoader(test_dataset, batch_size=args['batch_size'], shuffle=False, num_workers=0, pin_memory=True)
+    # test_dataloader = data.DataLoader(test_dataset, batch_size=args['batch_size'], shuffle=False, num_workers=0, pin_memory=True)
+    # for simplicity during collection
+    test_dataloader = data.DataLoader(test_dataset, batch_size=1, shuffle=False, num_workers=0, pin_memory=True)
 
     # Get the number of examples in the train, val, and test datasets
     num_test_instances = len(test_dataset)
@@ -149,7 +154,12 @@ def test(args, test_dataset, network):
 
     # Instantiate array for keeping track of all L_2 errors
     all_errors = np.zeros(num_test_instances)
-    
+
+    all_reconstructions = np.zeros_like(test_dataset.instances)
+
+    # Collect reconstruction differences
+    differences = np.zeros(num_test_instances)
+
     # Iterate over the TEST batches
     for batch_num, (inputs, ground_truths) in enumerate(test_dataloader):
         
@@ -165,6 +175,14 @@ def test(args, test_dataset, network):
         
         # Record the actual and predicted labels for the instance
         all_errors[ batch_num * args['batch_size'] : min( (batch_num + 1) * args['batch_size'], num_test_instances) ] = errors.detach().cpu().numpy()
+        all_reconstructions[ batch_num * args['batch_size'] : min( (batch_num + 1) * args['batch_size'], num_test_instances), :, :, : ] = reconstructions.detach().cpu().numpy()
+
+        # Looping the reconstructed images through the image difference process.
+        # TODO: there may be a cleaner way to write this loop
+        for image in range(len(inputs)):
+            # Call the utility function:
+            # TODO: batch sizes greater than 1 can be used if you used batch_num and image together
+            differences[batch_num] = compute_reconstruction_difference(reconstructions[image], ground_truths[image])
 
         # Give epoch status update
         print(' ' * 100, end='\r', flush=True) 
@@ -174,6 +192,7 @@ def test(args, test_dataset, network):
     print(' ' * 100, end='\r', flush=True) 
 
     # TODO: Compute whatever metrics
+    print(f'Fourier image differences: {differences}')
     print(f'Average L2 Error: {all_errors.mean().item() : 0.5f}')
 
 
