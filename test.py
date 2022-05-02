@@ -158,7 +158,7 @@ def test(args, test_dataset, network):
     all_reconstructions = np.zeros_like(test_dataset.instances)
 
     # Collect reconstruction differences
-    differences = np.zeros(num_test_instances)
+    differences = np.zeros((3, num_test_instances))
 
     # Iterate over the TEST batches
     for batch_num, (inputs, ground_truths) in enumerate(test_dataloader):
@@ -182,7 +182,7 @@ def test(args, test_dataset, network):
         for image in range(len(inputs)):
             # Call the utility function:
             # TODO: batch sizes greater than 1 can be used if you used batch_num and image together
-            differences[batch_num] = compute_reconstruction_difference(reconstructions[image], ground_truths[image])
+            differences[0, batch_num], differences[1, batch_num], differences[2, batch_num]= compute_reconstruction_difference(reconstructions[image], ground_truths[image])
 
         # Give epoch status update
         print(' ' * 100, end='\r', flush=True) 

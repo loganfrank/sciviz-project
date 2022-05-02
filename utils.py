@@ -122,7 +122,7 @@ def compute_reconstruction_difference(reconstruction, ground_truth):
     # It can be used for other analysis.
     # diff_image_inv  = np.fft.ifftshift(diff_image)
 
-    return np.sum(abs(np.fft.ifft2(diff_image)))
+    return np.sum(abs(np.fft.ifft2(diff_image))), np.sum(abs(np.fft.ifft2(norm_fft_ground_truth))), np.sum(abs(np.fft.ifft2(norm_fft_reconstruction)))
 
 
 
