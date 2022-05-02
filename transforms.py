@@ -70,9 +70,25 @@ class MaskAndVoronoi2D(object):
 
         # pts = np.array(self.points).reshape(96, 96, 2).transpose(2, 0, 1)
 
+        # fig, axes = plt.subplots(1, 4)
+        # axes[0].quiver(pts[0, ::2, ::2], pts[1, ::2, ::2], u[::2, ::2], v[::2, ::2], angles='xy', scale_units='xy', scale=10, headwidth=2)
+        # axes[1].imshow(mask, cmap='gray')
+        # axes[2].imshow(voronoi_u, cmap='gray')
+        # axes[3].imshow(voronoi_v, cmap='gray')
+        
+        # axes[0].axis('equal')
+        # axes[0].axis('off')
+        # axes[1].axis('off')
+        # axes[2].axis('off')
+        # axes[3].axis('off')
+        
+        # plt.savefig('inputs.png', dpi=800)
+        
         # fig = plt.Figure()
-        # plt.quiver(pts[0], pts[1], u, v, angles='xy', scale_units='xy')
-        # plt.show()
+        # plt.quiver(pts[0, ::3, ::3], pts[1, ::3, ::3], u[::3, ::3], v[::3, ::3], angles='xy', scale_units='xy', scale=9, headwidth=3)
+        # plt.axis('equal')
+        # plt.axis('off')
+        # plt.savefig('vector_field.png', dpi=1000)
 
         # Return mask and Voronoi network input
         return output

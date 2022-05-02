@@ -124,6 +124,101 @@ def main(args):
     # Call the train helper function
     test(args, test_dataset, network)
 
+def query_point(points):
+    temp = ((0 <= points[:, 0]) & (points[:, 0] <= 95))
+    temp2= ((0 <= points[:, 1]) & (points[:, 1] <= 95))
+    return np.all(np.stack([temp, temp2]), axis=0).reshape(-1, 1)
+        
+def get_cell(points: np.ndarray) -> list:
+    # Transform the point from physical space to the data space
+    transformedx, transformedy = points[:, 1], points[:, 0]
+    
+    # Determine the bounds of the cell
+    xfloor = np.floor(transformedx)
+    xceil = np.floor(transformedx) + 1
+    yfloor = np.floor(transformedy)
+    yceil = np.floor(transformedy) + 1
+    
+    # Handle upper edge case
+    xfloor = np.where(xfloor == 95, 94, xfloor).astype(np.uint16)
+    xceil = np.where(xceil == 96, 95, xceil).astype(np.uint16)
+    yfloor = np.where(yfloor == 95, 94, yfloor).astype(np.uint16)
+    yceil = np.where(yceil == 96, 95, yceil).astype(np.uint16)
+    
+    # Compute the interpolation weights
+    xweight = (transformedx - xfloor) / (xceil - xfloor)
+    yweight = (transformedy - yfloor) / (yceil - yfloor)
+    
+    bottom_left = [yfloor, xfloor]
+    bottom_right = [yfloor, xceil]
+    upper_left = [yceil, xfloor]
+    upper_right = [yceil, xceil]
+    
+    return np.transpose(np.array([bottom_left, bottom_right, upper_left, upper_right], dtype=np.uint8), axes=(0, 2, 1)), np.array([xweight, yweight]).T
+
+def get_value(field, cells, interpolation_weights):
+    # Each cell is [x, y, z]
+    bottom_left = cells[0, :, :]
+    bottom_right = cells[1, :, :]
+    upper_left = cells[2, :, :]
+    upper_right = cells[3, :, :]
+    
+    # Get the values at the indexes
+    bottom_left = field[..., bottom_left[:, 0], bottom_left[:, 1]]
+    bottom_right = field[..., bottom_right[:, 0], bottom_right[:, 1]]
+    upper_left = field[..., upper_left[:, 0], upper_left[:, 1]]
+    upper_right = field[..., upper_right[:, 0], upper_right[:, 1]]
+
+    
+    # Get the interpolation weights
+    wx = interpolation_weights[:, 0]
+    wy = interpolation_weights[:, 1]
+    
+    lerp1 = (1 - wx) * upper_left + wx * upper_right
+    lerp2 = (1 - wx) * bottom_left + wx * bottom_right
+    
+    # Perform bilinear interpolation
+    return ((1 - wy) * lerp2 + wy * lerp1).T
+
+def query_value(field, points):
+    assert np.all(query_point(points)), 'must provide points in grid bounds'
+    cells, interpolation_weights = get_cell(points)
+    return get_value(field, cells, interpolation_weights)
+    
+### Euler Particle Tracing Method, slightly altered from lab 3
+def trace_euler(field: np.ndarray, starting_positions: np.ndarray, num_steps: int = 200, step_size: float = 0.5, verbose: bool = False) -> np.ndarray:
+    # Create the array to keep track of all positions of the particle
+    points = np.zeros((num_steps + 1, *starting_positions.shape))
+    points[0, :, :] = starting_positions
+    
+    # Create the variable for the current position of the particle and initialize it to be the starting positions
+    current_positions = starting_positions
+    
+    # Perform particle tracing
+    for step in range(1, num_steps + 1):
+        # Find the vector values at the current position
+        vectors = query_value(field, current_positions)
+        vectors = vectors / (np.sqrt((vectors ** 2).sum(axis=1)).reshape(-1, 1) + 1e-8)
+        
+        # Update the position of the particle (depending on if it will be in bounds or not)
+        next_step = current_positions + (vectors * step_size)
+        next_step_in_bounds = query_point(next_step)
+        current_positions = np.where(next_step_in_bounds, next_step, current_positions)
+        
+        # Add the path of the particle
+        points[step, :, :] = current_positions
+        
+        # Print status
+        if verbose:
+            print(' ' * 100, end='\r', flush=True) 
+            print(f'Tracing: {100. * step / num_steps}%', end='\r', flush=True)
+    
+    # Clear the status update message
+    if verbose:
+        print(' ' * 100, end='\r', flush=True) 
+    
+    return np.hstack(points)
+
 #################################
 ##### Helper train function #####
 #################################
@@ -133,7 +228,7 @@ def test(args, test_dataset, network):
     network = network.to(args['device'])
 
     # Create the dataloaders, seed their workers, etc.
-    test_dataloader = data.DataLoader(test_dataset, batch_size=args['batch_size'], shuffle=False, num_workers=0, pin_memory=True)
+    test_dataloader = data.DataLoader(test_dataset, batch_size=1, shuffle=False, num_workers=0, pin_memory=True)
 
     # Get the number of examples in the train, val, and test datasets
     num_test_instances = len(test_dataset)
@@ -148,8 +243,13 @@ def test(args, test_dataset, network):
     network.eval()
     torch.set_grad_enabled(False)
 
-    # Instantiate array for keeping track of all L_2 errors
-    all_errors = np.zeros(num_test_instances)
+    # The starting points for particle tracing
+    # All points in the example
+    size = 96
+    x = np.linspace(0, size - 1, num=size)
+    y = np.linspace(0, size - 1, num=size)
+    starting_points = np.stack(np.meshgrid(y, x, indexing='ij')).reshape(2, -1).T
+    pts = starting_points.reshape(96, 96, 2).transpose(2, 0, 1)
     
     # Iterate over the TEST batches
     for batch_num, (inputs, ground_truths) in enumerate(test_dataloader):
@@ -160,12 +260,39 @@ def test(args, test_dataset, network):
         
         # Forward propagation
         reconstructions = network(inputs)
+        reconstructions = reconstructions.squeeze().detach().cpu().numpy()
+        ground_truths = ground_truths.squeeze().detach().cpu().numpy()
         
-        # Threshold for flat prediction - gets the average L2 error for each example
-        errors = F.mse_loss(reconstructions, ground_truths, reduction='none').mean(dim=[1, 2, 3])
+        # Perform particle tracing
+        reconstruction_paths = trace_euler(reconstructions, starting_points, 200, 0.25)
+        reconstruction_paths = reconstruction_paths[[1716, 2505, 7050, 8018], :]
+        reconstruction_paths = reconstruction_paths.reshape(4, -1, 2)
+        ground_truth_paths = trace_euler(ground_truths, starting_points, 200, 0.25)
+        ground_truth_paths = ground_truth_paths[[1716, 2505, 7050, 8018], :]
+        ground_truth_paths = ground_truth_paths.reshape(4, -1, 2)
         
-        # Record the actual and predicted labels for the instance
-        all_errors[ batch_num * args['batch_size'] : min( (batch_num + 1) * args['batch_size'], num_test_instances) ] = errors.detach().cpu().numpy()
+        ur = reconstructions[0, :, :]
+        vr = reconstructions[1, :, :]
+        ugt = ground_truths[0, :, :]
+        vgt = ground_truths[1, :, :]
+        
+        fig, axes = plt.subplots(1, 2)
+        axes[0].quiver(pts[0, ::3, ::3], pts[1, ::3, ::3], ur[::3, ::3], vr[::3, ::3], angles='xy', scale_units='xy', scale=9, headwidth=3)
+        axes[0].axis('equal')
+        axes[0].axis('off')
+        axes[0].plot(reconstruction_paths[0, :, 0], reconstruction_paths[0, :, 1], label='path1')
+        axes[0].plot(reconstruction_paths[1, :, 0], reconstruction_paths[1, :, 1], label='path2')
+        axes[0].plot(reconstruction_paths[2, :, 0], reconstruction_paths[2, :, 1], label='path3')
+        axes[0].plot(reconstruction_paths[3, :, 0], reconstruction_paths[3, :, 1], label='path4')
+        
+        axes[1].quiver(pts[0, ::3, ::3], pts[1, ::3, ::3], ur[::3, ::3], vr[::3, ::3], angles='xy', scale_units='xy', scale=9, headwidth=3)
+        axes[1].axis('equal')
+        axes[1].axis('off')
+        axes[1].plot(ground_truth_paths[0, :, 0], ground_truth_paths[0, :, 1], label='path1')
+        axes[1].plot(ground_truth_paths[1, :, 0], ground_truth_paths[1, :, 1], label='path2')
+        axes[1].plot(ground_truth_paths[2, :, 0], ground_truth_paths[2, :, 1], label='path3')
+        axes[1].plot(ground_truth_paths[3, :, 0], ground_truth_paths[3, :, 1], label='path4')
+        plt.show()
 
         # Give epoch status update
         print(' ' * 100, end='\r', flush=True) 
@@ -173,9 +300,6 @@ def test(args, test_dataset, network):
     
     # Clear the status update message
     print(' ' * 100, end='\r', flush=True) 
-
-    # TODO: Compute whatever metrics
-    print(f'Average L2 Error: {all_errors.mean().item() : 0.5f}')
 
 
 ##############################################################
