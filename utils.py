@@ -6,6 +6,9 @@ import torch
 import torch.nn as nn
 import numpy as np
 
+import matplotlib.pyplot as plt
+from skimage.io import imread, imshow
+
 ########################################################
 ##### Init function to seed each dataloader worker #####
 ########################################################
@@ -85,3 +88,62 @@ def adjust_weight_decay_and_learning_rate(network, weight_decay=1e-4, skip_list=
     # Create the list to separate the parameters
     return [{ 'params': no_decay, 'weight_decay': 0.0 }, { 'params': decay, 'weight_decay': weight_decay }]
  
+##### Plotting spectrograms for analysis #####
+
+
+
+##### Fourier image difference #####
+
+def compute_reconstruction_difference(reconstruction, ground_truth):
+
+
+
+    norm_reconstruction = np.linalg.norm(reconstruction.cpu(), ord=2, axis=0)
+
+    norm_ground_truth = np.linalg.norm(ground_truth.cpu(), ord=2, axis=0)
+
+    plt.imshow(norm_reconstruction, cmap='gray')
+    plt.axis('off')
+
+    plt.imshow(norm_ground_truth, cmap='gray')
+    plt.axis('off')
+
+    norm_fft_reconstruction = np.fft.fftshift(np.fft.fft2(norm_reconstruction))
+    norm_fft_ground_truth =  np.fft.fftshift(np.fft.fft2(norm_ground_truth))
+    diff_image = norm_fft_ground_truth - norm_fft_reconstruction
+
+    # Plot the differences in the frequency domain?
+    
+    # Inverse the 2d fft and take the abs to make the differences clear
+    plt.imshow(abs(np.fft.ifft2(diff_image)), cmap='gray')
+    plt.axis('off')
+
+    # May not be necessary to convert this back.
+    # It can be used for other analysis.
+    # diff_image_inv  = np.fft.ifftshift(diff_image)
+
+    return np.sum(abs(np.fft.ifft2(diff_image))), np.sum(abs(np.fft.ifft2(norm_fft_ground_truth))), np.sum(abs(np.fft.ifft2(norm_fft_reconstruction)))
+
+
+
+
+##### Data to wave function #####
+
+def data_to_waves(data):
+    # Compute the wave f(x,y) for x and y dimensions
+    
+    # First: get the magnitude for direcitons i.e. collapse u v channels
+
+    normed_data = np.linalg.norm(data.squeeze(0), ord=2, axis=0)
+
+    # Get the wave for all x values and then all y values
+    
+
+
+    pass
+
+
+# def 
+
+
+
